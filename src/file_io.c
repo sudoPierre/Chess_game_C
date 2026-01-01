@@ -1,193 +1,155 @@
 #include "file_io.h"
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <dirent.h>
 
+#define SAVE_DIR "saves"
+#define SAVE_EXT ".sav"
 #define SAVE_HEADER "CHESS_SAVE_V1"
 
-//-----------------------------
-// Fonctions utilitaires
-//-----------------------------
+/* =========================
+   UTILS
+   ========================= */
 
-// Convertit le type de pièce en caractère pour la sauvegarde
-static char piece_type_to_char(PieceType type) {
-    switch (type) {
-        case PIECE_ROOK:   return 'R';
-        case PIECE_KNIGHT: return 'N';
-        case PIECE_BISHOP: return 'B';
-        case PIECE_QUEEN:  return 'Q';
-        default:           return '?';
+static char piece_to_char(PieceType t) {
+    switch (t) {
+    case PIECE_ROOK:   return 'R';
+    case PIECE_KNIGHT: return 'N';
+    case PIECE_BISHOP: return 'B';
+    case PIECE_QUEEN:  return 'Q';
+    default: return '?';
     }
 }
 
-// Convertit un caractère en type de pièce
-static bool char_to_piece_type(char c, PieceType *outType) {
-    if (!outType) return false;
+static int char_to_piece(char c, PieceType* out) {
+    if (!out) return 0;
     switch (c) {
-        case 'R': *outType = PIECE_ROOK;   return true;
-        case 'N': *outType = PIECE_KNIGHT; return true;
-        case 'B': *outType = PIECE_BISHOP; return true;
-        case 'Q': *outType = PIECE_QUEEN;  return true;
-        default:  return false;
+    case 'R': *out = PIECE_ROOK;   return 1;
+    case 'N': *out = PIECE_KNIGHT; return 1;
+    case 'B': *out = PIECE_BISHOP; return 1;
+    case 'Q': *out = PIECE_QUEEN;  return 1;
+    default: return 0;
     }
 }
 
-// Remplace les retours à la ligne par des espaces pour éviter les corruptions de sauvegarde
-static void sanitize_message(const char *input, char *output, size_t outputSize) {
-    if (!input || !output || outputSize == 0) return;
-    size_t len = strnlen(input, outputSize - 1);
-    for (size_t i = 0; i < len; ++i) {
-        char c = input[i];
-        if (c == '\n' || c == '\r') c = ' ';
-        output[i] = c;
-    }
-    output[len] = '\0';
-}
+/* =========================
+   SAVE
+   ========================= */
 
-/**
- * Sauvegarde l'état du jeu et du chat dans le fichier spécifié.
- */
-bool save_game_to_path(const GameState *state, const ChatLog *log, const char *path) {
-    // Vérifie les paramètres
+bool save_game_to_path(const GameState* state, const ChatLog* log, const char* path) {
     if (!state || !path) return false;
 
-    // Ouvre le fichier en écriture
-    FILE *fp = fopen(path, "w");
-    if (!fp) return false;
+    FILE* f = fopen(path, "w");
+    if (!f) return false;
 
-    // Sauvegarde les métadonnées de la partie
-    fprintf(fp, "%s\n", SAVE_HEADER);
-    fprintf(fp, "MODE %d\n", (int)state->mode);
-    fprintf(fp, "CURRENT_PLAYER %d\n", (int)state->currentPlayer);
-    fprintf(fp, "SCORES %d %d\n", state->score[PLAYER_WHITE], state->score[PLAYER_BLACK]);
-    fprintf(fp, "PAUSED %d\n", state->isPaused ? 1 : 0);
-    fprintf(fp, "GAME_OVER %d\n", state->isGameOver ? 1 : 0);
-    fprintf(fp, "BOARD\n");
+    fprintf(f, "%s\n", SAVE_HEADER);
+    fprintf(f, "%d %d %d %d %d %d\n",
+        (int)state->mode,
+        (int)state->currentPlayer,
+        state->score[0],
+        state->score[1],
+        (int)state->isPaused,
+        (int)state->isGameOver);
 
-    // Sauvegarde l'état du plateau
-    for (int row = 0; row < BOARD_SIZE; ++row) {
-        for (int col = 0; col < BOARD_SIZE; ++col) {
-            const Square *sq = &state->board[row][col];
+    for (int r = 0; r < BOARD_SIZE; r++) {
+        for (int c = 0; c < BOARD_SIZE; c++) {
+            const Square* sq = &state->board[r][c];
             if (!sq->occupied) {
-                fputs("__", fp);
-            } else {
-                char typeChar = piece_type_to_char(sq->type);
-                char ownerChar = (sq->owner == PLAYER_WHITE) ? 'W' : 'B';
-                fputc(typeChar, fp);
-                fputc(ownerChar, fp);
+                fprintf(f, "__ ");
             }
-            if (col < BOARD_SIZE - 1) fputc(' ', fp);
+            else {
+                fprintf(f, "%c%c ",
+                    piece_to_char(sq->type),
+                    sq->owner == PLAYER_WHITE ? 'W' : 'B');
+            }
         }
-        fputc('\n', fp);
+        fprintf(f, "\n");
     }
 
-    // Sauvegarde l'historique du chat
-    size_t chatCount = log ? log->count : 0;
-    fprintf(fp, "CHAT %zu\n", chatCount);
-    if (log) {
-        for (size_t i = 0; i < chatCount; ++i) {
-            const ChatEntry *entry = &log->entries[i];
-            char sanitized[CHAT_MESSAGE_LENGTH];
-            sanitize_message(entry->message, sanitized, sizeof(sanitized));
-            fprintf(fp, "ENTRY %d\n", (int)entry->speaker);
-            fprintf(fp, "TEXT %s\n", sanitized);
-        }
-    }
-
-    // Ferme le fichier
-    fclose(fp);
+    fclose(f);
     return true;
 }
 
-/**
- * Charge l'état du jeu et du chat depuis le fichier spécifié.
- */
-bool load_game_from_path(GameState *state, ChatLog *log, const char *path) {
-    // Vérifie les paramètres
+/* =========================
+   LIST SAVES
+   ========================= */
+
+int list_save_files(char files[][256], int max) {
+    DIR* dir = opendir(SAVE_DIR);
+    if (!dir) return 0;
+
+    struct dirent* entry;
+    int count = 0;
+
+    while ((entry = readdir(dir)) && count < max) {
+        const char* name = entry->d_name;
+        size_t len = strlen(name);
+
+        if (len > 4 && strcmp(name + len - 4, SAVE_EXT) == 0) {
+            strncpy(files[count], name, 255);
+            files[count][255] = '\0';
+            count++;
+        }
+    }
+
+    closedir(dir);
+    return count;
+}
+
+/* =========================
+   LOAD
+   ========================= */
+
+bool load_game_from_path(GameState* state, ChatLog* log, const char* path) {
     if (!state || !path) return false;
 
-    // Ouvre le fichier en lecture
-    FILE *fp = fopen(path, "r");
-    if (!fp) return false;
+    FILE* f = fopen(path, "r");
+    if (!f) return false;
 
-    // Lecture de l'en-tête
-    char line[256];
-    if (!fgets(line, sizeof(line), fp)) { fclose(fp); return false; }
-    line[strcspn(line, "\r\n")] = '\0';
-    if (strcmp(line, SAVE_HEADER) != 0) { fclose(fp); return false; }
+    char header[64];
+    if (!fgets(header, sizeof(header), f)) { fclose(f); return false; }
+    header[strcspn(header, "\r\n")] = 0;
 
-    // Lecture des métadonnées
-    int modeValue = 0, currentPlayerValue = 0, scoreWhite = 0, scoreBlack = 0, paused = 0, gameOver = 0;
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "MODE %d", &modeValue) != 1) { fclose(fp); return false; }
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "CURRENT_PLAYER %d", &currentPlayerValue) != 1) { fclose(fp); return false; }
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "SCORES %d %d", &scoreWhite, &scoreBlack) != 2) { fclose(fp); return false; }
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "PAUSED %d", &paused) != 1) { fclose(fp); return false; }
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "GAME_OVER %d", &gameOver) != 1) { fclose(fp); return false; }
-    if (!fgets(line, sizeof(line), fp)) { fclose(fp); return false; }
-    line[strcspn(line, "\r\n")] = '\0';
-    if (strcmp(line, "BOARD") != 0) { fclose(fp); return false; }
+    if (strcmp(header, SAVE_HEADER) != 0) {
+        fclose(f);
+        return false;
+    }
 
-    // Prépare un état temporaire
-    GameState temp;
-    memset(&temp, 0, sizeof(temp));
-    temp.mode = (GameMode)modeValue;
-    temp.currentPlayer = (currentPlayerValue == 0) ? PLAYER_WHITE : PLAYER_BLACK;
-    temp.score[PLAYER_WHITE] = scoreWhite;
-    temp.score[PLAYER_BLACK] = scoreBlack;
-    temp.isPaused = paused != 0;
-    temp.isGameOver = gameOver != 0;
+    int paused, gameOver;
+    fscanf(f, "%d %d %d %d %d %d\n",
+        (int*)&state->mode,
+        (int*)&state->currentPlayer,
+        &state->score[0],
+        &state->score[1],
+        &paused,
+        &gameOver);
 
-    // Lecture du plateau
-    for (int row = 0; row < BOARD_SIZE; ++row) {
-        if (!fgets(line, sizeof(line), fp)) { fclose(fp); return false; }
-        char *token = strtok(line, " \t\r\n");
-        for (int col = 0; col < BOARD_SIZE; ++col) {
-            if (!token) { fclose(fp); return false; }
-            Square *sq = &temp.board[row][col];
-            if (strcmp(token, "__") == 0) {
+    state->isPaused = paused != 0;
+    state->isGameOver = gameOver != 0;
+
+    for (int r = 0; r < BOARD_SIZE; r++) {
+        for (int c = 0; c < BOARD_SIZE; c++) {
+            char tok[4];
+            fscanf(f, "%3s", tok);
+
+            Square* sq = &state->board[r][c];
+            if (strcmp(tok, "__") == 0) {
                 sq->occupied = false;
-                sq->type = PIECE_ROOK; // Par défaut
-                sq->owner = PLAYER_WHITE;
-            } else {
-                size_t tokenLen = strnlen(token, 3);
-                if (tokenLen != 2) { fclose(fp); return false; }
-                PieceType type;
-                if (!char_to_piece_type(token[0], &type)) { fclose(fp); return false; }
-                Player owner;
-                if (token[1] == 'W') owner = PLAYER_WHITE;
-                else if (token[1] == 'B') owner = PLAYER_BLACK;
-                else { fclose(fp); return false; }
-                sq->occupied = true;
-                sq->type = type;
-                sq->owner = owner;
             }
-            token = strtok(NULL, " \t\r\n");
+            else {
+                PieceType pt;
+                if (!char_to_piece(tok[0], &pt)) {
+                    fclose(f);
+                    return false;
+                }
+                sq->occupied = true;
+                sq->type = pt;
+                sq->owner = (tok[1] == 'W') ? PLAYER_WHITE : PLAYER_BLACK;
+            }
         }
     }
 
-    // Lecture du chat
-    size_t chatCount = 0;
-    if (!fgets(line, sizeof(line), fp) || sscanf(line, "CHAT %zu", &chatCount) != 1) { fclose(fp); return false; }
-    if (log) chat_init(log);
-
-    for (size_t i = 0; i < chatCount; ++i) {
-        int speakerValue = 0;
-        if (!fgets(line, sizeof(line), fp) || sscanf(line, "ENTRY %d", &speakerValue) != 1) { fclose(fp); return false; }
-        if (!fgets(line, sizeof(line), fp)) { fclose(fp); return false; }
-        if (strncmp(line, "TEXT ", 5) != 0) { fclose(fp); return false; }
-        char *text = line + 5;
-        text[strcspn(text, "\r\n")] = '\0';
-        if (log && i < CHAT_MAX_MESSAGES) {
-            ChatSpeaker speaker = CHAT_SPEAKER_SYSTEM;
-            if (speakerValue == (int)CHAT_SPEAKER_WHITE) speaker = CHAT_SPEAKER_WHITE;
-            else if (speakerValue == (int)CHAT_SPEAKER_BLACK) speaker = CHAT_SPEAKER_BLACK;
-            chat_add(log, speaker, text);
-        }
-    }
-
-    // Copie l'état temporaire dans l'état réel
-    *state = temp;
-
-    // Ferme le fichier
-    fclose(fp);
+    fclose(f);
     return true;
 }
