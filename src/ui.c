@@ -3,6 +3,20 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdlib.h>
+
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wunused-function"
+#endif
+
+#define STB_IMAGE_IMPLEMENTATION
+#define STBI_ONLY_PNG
+#include "stb_image.h"
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 static SDL_Rect make_rect(int x, int y, int w, int h) {
     SDL_Rect rect = { x, y, w, h };
@@ -54,7 +68,141 @@ static const uint8_t PIECE_ICON_DATA[PIECE_TYPE_COUNT][PIECE_ICON_RES] = {
     }
 };
 
-static void draw_piece_icon(SDL_Renderer *renderer, SDL_Rect tile, PieceType type, Player owner) {
+static SDL_Texture *load_texture(UiState *ui, const char *path) {
+    if (!ui || !ui->renderer || !path) {
+        return NULL;
+    }
+
+    SDL_Texture *texture = NULL;
+    stbi_uc *pixels = NULL;
+    int width = 0;
+    int height = 0;
+    int channels = 0;
+    char *basePath = SDL_GetBasePath();
+    if (basePath) {
+        char fullPath[512];
+        if (snprintf(fullPath, sizeof(fullPath), "%s%s", basePath, path) < (int)sizeof(fullPath)) {
+            pixels = stbi_load(fullPath, &width, &height, &channels, STBI_rgb_alpha);
+        }
+        SDL_free(basePath);
+    }
+
+    if (!pixels) {
+        pixels = stbi_load(path, &width, &height, &channels, STBI_rgb_alpha);
+    }
+
+    if (!pixels) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Unable to load PNG '%s': %s", path, stbi_failure_reason());
+        return NULL;
+    }
+
+    if (width <= 0 || height <= 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Invalid image dimensions for '%s'", path);
+        stbi_image_free(pixels);
+        return NULL;
+    }
+
+    texture = SDL_CreateTexture(ui->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC, width, height);
+
+    if (!texture) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Unable to create texture from '%s': %s", path, SDL_GetError());
+        stbi_image_free(pixels);
+        return NULL;
+    }
+
+    if (SDL_UpdateTexture(texture, NULL, pixels, width * 4) != 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Unable to upload texture data for '%s': %s", path, SDL_GetError());
+        SDL_DestroyTexture(texture);
+        stbi_image_free(pixels);
+        return NULL;
+    }
+
+    stbi_image_free(pixels);
+
+    if (SDL_SetTextureBlendMode(texture, SDL_BLENDMODE_BLEND) != 0) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Unable to set blend mode for '%s': %s", path, SDL_GetError());
+    }
+
+    return texture;
+}
+
+static SDL_Texture *load_texture_with_variants(UiState *ui, const char *paths[], size_t count) {
+    if (!paths || count == 0) {
+        return NULL;
+    }
+
+    SDL_Texture *texture = NULL;
+    for (size_t i = 0; i < count; ++i) {
+        texture = load_texture(ui, paths[i]);
+        if (texture) {
+            return texture;
+        }
+    }
+
+    const char *reason = stbi_failure_reason();
+    SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Unable to load icon texture '%s': %s", paths[count - 1], reason ? reason : "unknown error");
+    return NULL;
+}
+
+static void destroy_piece_textures(UiState *ui) {
+    if (!ui) {
+        return;
+    }
+    for (int owner = 0; owner < PLAYER_COUNT; ++owner) {
+        for (int type = 0; type < PIECE_TYPE_COUNT; ++type) {
+            if (ui->pieceTextures[owner][type]) {
+                SDL_DestroyTexture(ui->pieceTextures[owner][type]);
+                ui->pieceTextures[owner][type] = NULL;
+            }
+        }
+    }
+}
+
+static bool load_piece_textures(UiState *ui) {
+    if (!ui || !ui->renderer) {
+        return false;
+    }
+
+    destroy_piece_textures(ui);
+
+    bool success = true;
+
+    const char *whiteRook[] = { "icons/Rook-white.png" };
+    ui->pieceTextures[PLAYER_WHITE][PIECE_ROOK] = load_texture_with_variants(ui, whiteRook, sizeof(whiteRook) / sizeof(whiteRook[0]));
+    success &= ui->pieceTextures[PLAYER_WHITE][PIECE_ROOK] != NULL;
+
+    const char *whiteKnight[] = { "icons/Knight-white.png" };
+    ui->pieceTextures[PLAYER_WHITE][PIECE_KNIGHT] = load_texture_with_variants(ui, whiteKnight, sizeof(whiteKnight) / sizeof(whiteKnight[0]));
+    success &= ui->pieceTextures[PLAYER_WHITE][PIECE_KNIGHT] != NULL;
+
+    const char *whiteBishop[] = { "icons/Bishop-white.png", "icons/Bishop-hite.png" };
+    ui->pieceTextures[PLAYER_WHITE][PIECE_BISHOP] = load_texture_with_variants(ui, whiteBishop, sizeof(whiteBishop) / sizeof(whiteBishop[0]));
+    success &= ui->pieceTextures[PLAYER_WHITE][PIECE_BISHOP] != NULL;
+
+    const char *whiteQueen[] = { "icons/Queen-white.png" };
+    ui->pieceTextures[PLAYER_WHITE][PIECE_QUEEN] = load_texture_with_variants(ui, whiteQueen, sizeof(whiteQueen) / sizeof(whiteQueen[0]));
+    success &= ui->pieceTextures[PLAYER_WHITE][PIECE_QUEEN] != NULL;
+
+    const char *blackRook[] = { "icons/Rook-black.png" };
+    ui->pieceTextures[PLAYER_BLACK][PIECE_ROOK] = load_texture_with_variants(ui, blackRook, sizeof(blackRook) / sizeof(blackRook[0]));
+    success &= ui->pieceTextures[PLAYER_BLACK][PIECE_ROOK] != NULL;
+
+    const char *blackKnight[] = { "icons/Knight-black.png" };
+    ui->pieceTextures[PLAYER_BLACK][PIECE_KNIGHT] = load_texture_with_variants(ui, blackKnight, sizeof(blackKnight) / sizeof(blackKnight[0]));
+    success &= ui->pieceTextures[PLAYER_BLACK][PIECE_KNIGHT] != NULL;
+
+    const char *blackBishop[] = { "icons/Bishop-black.png" };
+    ui->pieceTextures[PLAYER_BLACK][PIECE_BISHOP] = load_texture_with_variants(ui, blackBishop, sizeof(blackBishop) / sizeof(blackBishop[0]));
+    success &= ui->pieceTextures[PLAYER_BLACK][PIECE_BISHOP] != NULL;
+
+    const char *blackQueen[] = { "icons/Queen-black.png" };
+    ui->pieceTextures[PLAYER_BLACK][PIECE_QUEEN] = load_texture_with_variants(ui, blackQueen, sizeof(blackQueen) / sizeof(blackQueen[0]));
+    success &= ui->pieceTextures[PLAYER_BLACK][PIECE_QUEEN] != NULL;
+
+    return success;
+}
+
+static void draw_piece_fallback(SDL_Renderer *renderer, SDL_Rect tile, PieceType type, Player owner) {
     if (!renderer || type < 0 || type >= PIECE_TYPE_COUNT) {
         return;
     }
@@ -100,6 +248,52 @@ static void draw_piece_icon(SDL_Renderer *renderer, SDL_Rect tile, PieceType typ
         scale * PIECE_ICON_RES
     };
     SDL_RenderDrawRect(renderer, &outline);
+}
+
+static void draw_piece(UiState *ui, SDL_Rect tile, PieceType type, Player owner) {
+    if (!ui || owner < 0 || owner >= PLAYER_COUNT) {
+        return;
+    }
+
+    SDL_Texture *texture = NULL;
+    if (type >= 0 && type < PIECE_TYPE_COUNT) {
+        texture = ui->pieceTextures[owner][type];
+    }
+
+    if (texture) {
+        int texW = 0;
+        int texH = 0;
+        if (SDL_QueryTexture(texture, NULL, NULL, &texW, &texH) != 0 || texW <= 0 || texH <= 0) {
+            draw_piece_fallback(ui->renderer, tile, type, owner);
+            return;
+        }
+
+        double scaleX = (double)tile.w / (double)texW;
+        double scaleY = (double)tile.h / (double)texH;
+        double scale = scaleX < scaleY ? scaleX : scaleY;
+        if (scale >= 1.0) {
+            scale *= 0.9; // leave a small margin when the texture would fill the tile
+        }
+
+        int drawW = (int)(texW * scale);
+        int drawH = (int)(texH * scale);
+        if (drawW <= 0 || drawH <= 0) {
+            draw_piece_fallback(ui->renderer, tile, type, owner);
+            return;
+        }
+
+        SDL_Rect dest = {
+            tile.x + (tile.w - drawW) / 2,
+            tile.y + (tile.h - drawH) / 2,
+            drawW,
+            drawH
+        };
+
+        SDL_RenderCopy(ui->renderer, texture, NULL, &dest);
+        return;
+    }
+
+    draw_piece_fallback(ui->renderer, tile, type, owner);
 }
 
 static int board_pixel_left(const UiState *ui) {
@@ -206,7 +400,7 @@ static void render_board(UiState *ui, const GameState *game) {
 
             const Square *sq = &game->board[row][col];
             if (sq->occupied) {
-                draw_piece_icon(renderer, tile, sq->type, sq->owner);
+                draw_piece(ui, tile, sq->type, sq->owner);
             }
         }
     }
@@ -396,7 +590,12 @@ bool ui_init(UiState *ui, const char *title) {
 
     SDL_SetRenderDrawBlendMode(ui->renderer, SDL_BLENDMODE_BLEND);
 
+    if (!load_piece_textures(ui)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "One or more piece textures failed to load. Using fallback renderer for missing assets.");
+    }
+
     if (!bitmap_font_init(&ui->font)) {
+        destroy_piece_textures(ui);
         SDL_DestroyRenderer(ui->renderer);
         SDL_DestroyWindow(ui->window);
         SDL_Quit();
@@ -419,6 +618,7 @@ void ui_cleanup(UiState *ui) {
     if (!ui) {
         return;
     }
+    destroy_piece_textures(ui);
     bitmap_font_shutdown(&ui->font);
     if (ui->renderer) {
         SDL_DestroyRenderer(ui->renderer);

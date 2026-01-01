@@ -1,0 +1,16 @@
+# Compiled objects and binaries
+*.o
+*.so
+*.dll
+*.dylib
+*.exe
+*.out
+chess_game
+
+# Debug symbols
+*.dSYM/
+
+# System-specific files
+.DS_Store
+Thumbs.db
+._*
