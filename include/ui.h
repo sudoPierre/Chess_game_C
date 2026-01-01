@@ -42,6 +42,7 @@ typedef struct {
 typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
+    SDL_Texture *pieceTextures[PLAYER_COUNT][PIECE_TYPE_COUNT];
     BitmapFont font;
     UiView view;
     bool running;
