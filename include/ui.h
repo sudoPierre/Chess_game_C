@@ -1,4 +1,4 @@
-#ifndef UI_H
+﻿#ifndef UI_H
 #define UI_H
 
 #include <stdbool.h>
@@ -16,7 +16,8 @@
 typedef enum {
     UI_VIEW_MAIN_MENU = 0,
     UI_VIEW_GAME,
-    UI_VIEW_PAUSE
+    UI_VIEW_PAUSE,
+    UI_VIEW_COLOR_MENU
 } UiView;
 
 typedef enum {
@@ -58,6 +59,14 @@ typedef struct {
     char statusMessage[128];
     bool statusVisible;
     Uint32 statusVisibleUntil;
+    SDL_Color whitePieceColor;
+    SDL_Color whitePieceAccent;
+    SDL_Color blackPieceColor;
+    SDL_Color blackPieceAccent;
+    int colorMenuSelection;
+    int colorComponent;
+    int whiteColorIndex;
+    int blackColorIndex;
 } UiState;
 
 bool ui_init(UiState *ui, const char *title);
@@ -72,3 +81,12 @@ void ui_toggle_chat_speaker(UiState *ui);
 void ui_reset_game_interaction(UiState *ui);
 
 #endif // UI_H
+
+void ui_set_piece_colors(
+    UiState* ui,
+    SDL_Color whiteBase,
+    SDL_Color whiteAccent,
+    SDL_Color blackBase,
+    SDL_Color blackAccent
+);
+

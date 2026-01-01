@@ -1,8 +1,21 @@
-#include "ui.h"
+﻿#include "ui.h"
 
 #include <stdio.h>
 #include <string.h>
 #include <stdint.h>
+
+
+static SDL_Color PIECE_COLORS[] = {
+    {240, 240, 240, 255}, // blanc classique
+    {200, 200, 255, 255}, // bleu clair
+    {255, 200, 200, 255}, // rouge clair
+    {200, 255, 200, 255}, // vert clair
+    {255, 255, 180, 255}, // jaune
+    {220, 180, 255, 255}  // violet
+};
+
+#define PIECE_COLOR_COUNT (sizeof(PIECE_COLORS) / sizeof(PIECE_COLORS[0]))
+
 
 static SDL_Rect make_rect(int x, int y, int w, int h) {
     SDL_Rect rect = { x, y, w, h };
@@ -54,7 +67,7 @@ static const uint8_t PIECE_ICON_DATA[PIECE_TYPE_COUNT][PIECE_ICON_RES] = {
     }
 };
 
-static void draw_piece_icon(SDL_Renderer *renderer, SDL_Rect tile, PieceType type, Player owner) {
+static void draw_piece_icon(UiState* ui, SDL_Renderer* renderer, SDL_Rect tile, PieceType type, Player owner) {
     if (!renderer || type < 0 || type >= PIECE_TYPE_COUNT) {
         return;
     }
@@ -70,12 +83,18 @@ static void draw_piece_icon(SDL_Renderer *renderer, SDL_Rect tile, PieceType typ
     int marginX = (tile.w - scale * PIECE_ICON_RES) / 2;
     int marginY = (tile.h - scale * PIECE_ICON_RES) / 2;
 
-    SDL_Color baseColor = owner == PLAYER_WHITE ? (SDL_Color){ 240, 240, 240, 255 } : (SDL_Color){ 30, 35, 50, 255 };
-    SDL_Color accentColor = owner == PLAYER_WHITE ? (SDL_Color){ 200, 210, 220, 255 } : (SDL_Color){ 120, 130, 170, 255 };
+    SDL_Color baseColor = (owner == PLAYER_WHITE)
+        ? ui->whitePieceColor
+        : ui->blackPieceColor;
+
+    SDL_Color accentColor = (owner == PLAYER_WHITE)
+        ? ui->whitePieceAccent
+        : ui->blackPieceAccent;
+
 
     SDL_SetRenderDrawColor(renderer, baseColor.r, baseColor.g, baseColor.b, baseColor.a);
 
-    const uint8_t *rows = PIECE_ICON_DATA[type];
+    const uint8_t* rows = PIECE_ICON_DATA[type];
     for (int row = 0; row < PIECE_ICON_RES; ++row) {
         uint8_t rowMask = rows[row];
         for (int col = 0; col < PIECE_ICON_RES; ++col) {
@@ -102,19 +121,19 @@ static void draw_piece_icon(SDL_Renderer *renderer, SDL_Rect tile, PieceType typ
     SDL_RenderDrawRect(renderer, &outline);
 }
 
-static int board_pixel_left(const UiState *ui) {
+static int board_pixel_left(const UiState* ui) {
     return ui->boardOriginX;
 }
 
-static int board_pixel_top(const UiState *ui) {
+static int board_pixel_top(const UiState* ui) {
     return ui->boardOriginY;
 }
 
-static int board_pixel_size(const UiState *ui) {
+static int board_pixel_size(const UiState* ui) {
     return ui->tileSize * BOARD_SIZE;
 }
 
-static SDL_Rect board_rect(const UiState *ui) {
+static SDL_Rect board_rect(const UiState* ui) {
     return make_rect(board_pixel_left(ui), board_pixel_top(ui), board_pixel_size(ui), board_pixel_size(ui));
 }
 
@@ -138,7 +157,7 @@ static SDL_Rect pause_menu_button_rect(int index) {
     return make_rect(x, y, buttonWidth, buttonHeight);
 }
 
-static SDL_Rect game_panel_rect(const UiState *ui) {
+static SDL_Rect game_panel_rect(const UiState* ui) {
     int sideX = ui->boardOriginX + ui->tileSize * BOARD_SIZE + 32;
     int width = WINDOW_WIDTH - sideX - 32;
     if (width < 200) {
@@ -147,7 +166,7 @@ static SDL_Rect game_panel_rect(const UiState *ui) {
     return make_rect(sideX, 32, width, WINDOW_HEIGHT - 64);
 }
 
-static SDL_Rect game_button_rect(const UiState *ui, int index) {
+static SDL_Rect game_button_rect(const UiState* ui, int index) {
     SDL_Rect panel = game_panel_rect(ui);
     const int buttonHeight = 44;
     const int gap = 12;
@@ -157,17 +176,17 @@ static SDL_Rect game_button_rect(const UiState *ui, int index) {
     return make_rect(x, y, width, buttonHeight);
 }
 
-static void draw_rect(SDL_Renderer *renderer, SDL_Rect rect, SDL_Color color) {
+static void draw_rect(SDL_Renderer* renderer, SDL_Rect rect, SDL_Color color) {
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     SDL_RenderFillRect(renderer, &rect);
 }
 
-static void draw_rect_outline(SDL_Renderer *renderer, SDL_Rect rect, SDL_Color color) {
+static void draw_rect_outline(SDL_Renderer* renderer, SDL_Rect rect, SDL_Color color) {
     SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, color.a);
     SDL_RenderDrawRect(renderer, &rect);
 }
 
-static void render_text_center(SDL_Renderer *renderer, const BitmapFont *font, SDL_Rect rect, const char *text, SDL_Color color) {
+static void render_text_center(SDL_Renderer* renderer, const BitmapFont* font, SDL_Rect rect, const char* text, SDL_Color color) {
     int textWidth = bitmap_font_measure_text(font, text);
     int yOffset = font->glyphHeight * BITMAP_FONT_SCALE;
     int x = rect.x + (rect.w - textWidth) / 2;
@@ -175,8 +194,8 @@ static void render_text_center(SDL_Renderer *renderer, const BitmapFont *font, S
     bitmap_font_draw_text(renderer, font, x, y, text, color);
 }
 
-static void render_board(UiState *ui, const GameState *game) {
-    SDL_Renderer *renderer = ui->renderer;
+static void render_board(UiState* ui, const GameState* game) {
+    SDL_Renderer* renderer = ui->renderer;
     SDL_Rect boardArea = board_rect(ui);
     SDL_Color light = { 240, 217, 181, 255 };
     SDL_Color dark = { 181, 136, 99, 255 };
@@ -192,7 +211,8 @@ static void render_board(UiState *ui, const GameState *game) {
 
             if (ui->hasSelection && ui->selectedSquare.row == row && ui->selectedSquare.col == col) {
                 draw_rect(renderer, tile, highlight);
-            } else if (ui->hasSelection && game_is_valid_move(game, ui->selectedSquare, (Position){ row, col })) {
+            }
+            else if (ui->hasSelection && game_is_valid_move(game, ui->selectedSquare, (Position) { row, col })) {
                 SDL_Color moveColor = { 90, 200, 120, 140 };
                 draw_rect(renderer, tile, moveColor);
             }
@@ -204,17 +224,17 @@ static void render_board(UiState *ui, const GameState *game) {
             SDL_Color outline = { 30, 30, 30, 255 };
             draw_rect_outline(renderer, tile, outline);
 
-            const Square *sq = &game->board[row][col];
+            const Square* sq = &game->board[row][col];
             if (sq->occupied) {
-                draw_piece_icon(renderer, tile, sq->type, sq->owner);
+                draw_piece_icon(ui, renderer, tile, sq->type, sq->owner);
             }
         }
     }
 }
 
-static void render_scores(UiState *ui, const GameState *game) {
+static void render_scores(UiState* ui, const GameState* game) {
     SDL_Rect panel = game_panel_rect(ui);
-    SDL_Renderer *renderer = ui->renderer;
+    SDL_Renderer* renderer = ui->renderer;
     SDL_Color panelColor = { 45, 45, 55, 255 };
     draw_rect(renderer, panel, panelColor);
 
@@ -223,18 +243,18 @@ static void render_scores(UiState *ui, const GameState *game) {
 
     char scoreLine[64];
     snprintf(scoreLine, sizeof(scoreLine), "WHITE: %d", game->score[PLAYER_WHITE]);
-    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 36, scoreLine, (SDL_Color){ 235, 235, 240, 255 });
+    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 36, scoreLine, (SDL_Color) { 235, 235, 240, 255 });
 
     snprintf(scoreLine, sizeof(scoreLine), "BLACK: %d", game->score[PLAYER_BLACK]);
-    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 60, scoreLine, (SDL_Color){ 235, 235, 240, 255 });
+    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 60, scoreLine, (SDL_Color) { 235, 235, 240, 255 });
 
-    const char *turnText = (game->currentPlayer == PLAYER_WHITE) ? "TURN: WHITE" : "TURN: BLACK";
-    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 92, turnText, (SDL_Color){ 160, 220, 255, 255 });
+    const char* turnText = (game->currentPlayer == PLAYER_WHITE) ? "TURN: WHITE" : "TURN: BLACK";
+    bitmap_font_draw_text(renderer, &ui->font, panel.x + 16, panel.y + 92, turnText, (SDL_Color) { 160, 220, 255, 255 });
 }
 
-static void render_game_buttons(UiState *ui, const GameState *game) {
-    SDL_Renderer *renderer = ui->renderer;
-    const char *labels[] = {
+static void render_game_buttons(UiState* ui, const GameState* game) {
+    SDL_Renderer* renderer = ui->renderer;
+    const char* labels[] = {
         game->isPaused ? "RESUME" : "PAUSE",
         "SAVE",
         "LOAD",
@@ -253,13 +273,13 @@ static void render_game_buttons(UiState *ui, const GameState *game) {
     }
 }
 
-static void render_chat_panel(UiState *ui, const ChatLog *chat) {
+static void render_chat_panel(UiState* ui, const ChatLog* chat) {
     ChatLog emptyLog;
     if (!chat) {
         memset(&emptyLog, 0, sizeof(emptyLog));
         chat = &emptyLog;
     }
-    SDL_Renderer *renderer = ui->renderer;
+    SDL_Renderer* renderer = ui->renderer;
     SDL_Rect panel = game_panel_rect(ui);
     int chatTop = panel.y + 140 + 5 * (44 + 12) + 24;
     int chatHeight = panel.y + panel.h - chatTop - 96;
@@ -268,8 +288,8 @@ static void render_chat_panel(UiState *ui, const ChatLog *chat) {
     }
 
     SDL_Rect chatRect = make_rect(panel.x + 16, chatTop, panel.w - 32, chatHeight);
-    draw_rect(renderer, chatRect, (SDL_Color){ 35, 35, 45, 255 });
-    draw_rect_outline(renderer, chatRect, (SDL_Color){ 80, 80, 110, 255 });
+    draw_rect(renderer, chatRect, (SDL_Color) { 35, 35, 45, 255 });
+    draw_rect_outline(renderer, chatRect, (SDL_Color) { 80, 80, 110, 255 });
 
     int lineHeight = ui->font.glyphHeight * BITMAP_FONT_SCALE + 6;
     int maxLines = chatHeight / lineHeight;
@@ -280,11 +300,12 @@ static void render_chat_panel(UiState *ui, const ChatLog *chat) {
 
     int y = chatRect.y + 8;
     for (int i = startIndex; i < (int)chat->count; ++i) {
-        const ChatEntry *entry = &chat->entries[i];
+        const ChatEntry* entry = &chat->entries[i];
         SDL_Color speakerColor = { 200, 200, 210, 255 };
         if (entry->speaker == CHAT_SPEAKER_WHITE) {
             speakerColor = (SDL_Color){ 220, 220, 255, 255 };
-        } else if (entry->speaker == CHAT_SPEAKER_BLACK) {
+        }
+        else if (entry->speaker == CHAT_SPEAKER_BLACK) {
             speakerColor = (SDL_Color){ 255, 210, 210, 255 };
         }
         char line[CHAT_MESSAGE_LENGTH + 16];
@@ -294,27 +315,27 @@ static void render_chat_panel(UiState *ui, const ChatLog *chat) {
     }
 
     SDL_Rect inputRect = make_rect(panel.x + 16, chatRect.y + chatRect.h + 12, panel.w - 32, 48);
-    draw_rect(renderer, inputRect, (SDL_Color){ 25, 25, 35, 255 });
-    draw_rect_outline(renderer, inputRect, (SDL_Color){ 90, 90, 120, 255 });
+    draw_rect(renderer, inputRect, (SDL_Color) { 25, 25, 35, 255 });
+    draw_rect_outline(renderer, inputRect, (SDL_Color) { 90, 90, 120, 255 });
 
     char prompt[160];
     snprintf(prompt, sizeof(prompt), "%s > %s_", chat_speaker_label(ui->chatSpeaker), ui->chatInput);
-    bitmap_font_draw_text(renderer, &ui->font, inputRect.x + 8, inputRect.y + 12, prompt, (SDL_Color){ 200, 200, 210, 255 });
+    bitmap_font_draw_text(renderer, &ui->font, inputRect.x + 8, inputRect.y + 12, prompt, (SDL_Color) { 200, 200, 210, 255 });
 
-    bitmap_font_draw_text(renderer, &ui->font, inputRect.x, inputRect.y + 32, "ENTER TO SEND / TAB TO SWITCH", (SDL_Color){ 120, 160, 200, 255 });
+    bitmap_font_draw_text(renderer, &ui->font, inputRect.x, inputRect.y + 32, "ENTER TO SEND / TAB TO SWITCH", (SDL_Color) { 120, 160, 200, 255 });
 }
 
-static void render_status_banner(UiState *ui) {
+static void render_status_banner(UiState* ui) {
     if (!ui->statusVisible) {
         return;
     }
     SDL_Rect rect = make_rect(0, WINDOW_HEIGHT - 48, WINDOW_WIDTH, 48);
-    draw_rect(ui->renderer, rect, (SDL_Color){ 20, 40, 60, 220 });
+    draw_rect(ui->renderer, rect, (SDL_Color) { 20, 40, 60, 220 });
     SDL_Color textColor = { 240, 250, 255, 255 };
     bitmap_font_draw_text(ui->renderer, &ui->font, rect.x + 16, rect.y + 12, ui->statusMessage, textColor);
 }
 
-static void render_game_scene(UiState *ui, const GameState *game, const ChatLog *chat) {
+static void render_game_scene(UiState* ui, const GameState* game, const ChatLog* chat) {
     render_board(ui, game);
     render_scores(ui, game);
     render_game_buttons(ui, game);
@@ -323,36 +344,36 @@ static void render_game_scene(UiState *ui, const GameState *game, const ChatLog 
     if (game->isGameOver) {
         SDL_Rect boardArea = board_rect(ui);
         SDL_Rect overlay = boardArea;
-        draw_rect(ui->renderer, overlay, (SDL_Color){ 10, 10, 10, 140 });
-        render_text_center(ui->renderer, &ui->font, overlay, "GAME OVER", (SDL_Color){ 255, 230, 120, 255 });
+        draw_rect(ui->renderer, overlay, (SDL_Color) { 10, 10, 10, 140 });
+        render_text_center(ui->renderer, &ui->font, overlay, "GAME OVER", (SDL_Color) { 255, 230, 120, 255 });
     }
 }
 
-static void render_pause_overlay(UiState *ui) {
+static void render_pause_overlay(UiState* ui) {
     SDL_Rect overlay = make_rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT);
-    draw_rect(ui->renderer, overlay, (SDL_Color){ 0, 0, 0, 140 });
+    draw_rect(ui->renderer, overlay, (SDL_Color) { 0, 0, 0, 140 });
     SDL_Color titleColor = { 230, 230, 240, 255 };
     SDL_Rect titleRect = make_rect(0, WINDOW_HEIGHT / 2 - 150, WINDOW_WIDTH, 60);
     render_text_center(ui->renderer, &ui->font, titleRect, "PAUSED", titleColor);
 
-    const char *labels[] = { "RESUME", "SAVE", "LOAD", "MAIN MENU" };
+    const char* labels[] = { "RESUME", "SAVE", "LOAD", "MAIN MENU" };
     for (int i = 0; i < 4; ++i) {
         SDL_Rect button = pause_menu_button_rect(i);
-        draw_rect(ui->renderer, button, (SDL_Color){ 35, 35, 50, 230 });
-        draw_rect_outline(ui->renderer, button, (SDL_Color){ 140, 140, 180, 255 });
-        render_text_center(ui->renderer, &ui->font, button, labels[i], (SDL_Color){ 235, 235, 240, 255 });
+        draw_rect(ui->renderer, button, (SDL_Color) { 35, 35, 50, 230 });
+        draw_rect_outline(ui->renderer, button, (SDL_Color) { 140, 140, 180, 255 });
+        render_text_center(ui->renderer, &ui->font, button, labels[i], (SDL_Color) { 235, 235, 240, 255 });
     }
 }
 
-static void render_main_menu(UiState *ui) {
-    SDL_Renderer *renderer = ui->renderer;
+static void render_main_menu(UiState* ui) {
+    SDL_Renderer* renderer = ui->renderer;
     SDL_SetRenderDrawColor(renderer, 18, 22, 36, 255);
     SDL_RenderClear(renderer);
 
     SDL_Rect titleRect = make_rect(0, 120, WINDOW_WIDTH, 64);
-    render_text_center(renderer, &ui->font, titleRect, "SIMPLIFIED CHESS", (SDL_Color){ 240, 240, 255, 255 });
+    render_text_center(renderer, &ui->font, titleRect, "SIMPLIFIED CHESS", (SDL_Color) { 240, 240, 255, 255 });
 
-    const char *labels[] = {
+    const char* labels[] = {
         "PLAY VS COMPUTER",
         "PLAY VS PLAYER",
         "LOAD GAME",
@@ -361,16 +382,26 @@ static void render_main_menu(UiState *ui) {
 
     for (int i = 0; i < 4; ++i) {
         SDL_Rect button = main_menu_button_rect(i);
-        draw_rect(renderer, button, (SDL_Color){ 35, 48, 82, 255 });
-        draw_rect_outline(renderer, button, (SDL_Color){ 120, 140, 190, 255 });
-        render_text_center(renderer, &ui->font, button, labels[i], (SDL_Color){ 235, 235, 240, 255 });
+        draw_rect(renderer, button, (SDL_Color) { 35, 48, 82, 255 });
+        draw_rect_outline(renderer, button, (SDL_Color) { 120, 140, 190, 255 });
+        render_text_center(renderer, &ui->font, button, labels[i], (SDL_Color) { 235, 235, 240, 255 });
     }
 
     SDL_Rect footerRect = make_rect(0, WINDOW_HEIGHT - 48, WINDOW_WIDTH, 32);
-    render_text_center(renderer, &ui->font, footerRect, "LEFT CLICK TO SELECT OPTIONS", (SDL_Color){ 160, 200, 220, 255 });
+    render_text_center(renderer, &ui->font, footerRect, "LEFT CLICK TO SELECT OPTIONS", (SDL_Color) { 160, 200, 220, 255 });
 }
 
-bool ui_init(UiState *ui, const char *title) {
+bool ui_init(UiState* ui, const char* title) {
+    ui->colorMenuSelection = 0;
+    ui->colorComponent = 0;
+
+    ui->whiteColorIndex = 0;
+    ui->blackColorIndex = 1;
+
+    ui->whitePieceColor = PIECE_COLORS[ui->whiteColorIndex];
+    ui->blackPieceColor = PIECE_COLORS[ui->blackColorIndex];
+
+
     if (!ui) {
         return false;
     }
@@ -415,7 +446,7 @@ bool ui_init(UiState *ui, const char *title) {
     return true;
 }
 
-void ui_cleanup(UiState *ui) {
+void ui_cleanup(UiState* ui) {
     if (!ui) {
         return;
     }
@@ -431,18 +462,81 @@ void ui_cleanup(UiState *ui) {
     SDL_StopTextInput();
     SDL_Quit();
 }
+static void render_color_menu(UiState* ui)
+{
+    const char* labels[] = {
+        "White Piece Base",
+        "White Piece Accent",
+        "Black Piece Base",
+        "Black Piece Accent"
+    };
 
-void ui_render(UiState *ui, const GameState *game, const ChatLog *chat) {
+    int x = 60;
+    int y = 60;
+
+    for (int i = 0; i < 4; ++i) {
+        SDL_Color c = (i == 0) ? ui->whitePieceColor :
+            (i == 1) ? ui->whitePieceAccent :
+            (i == 2) ? ui->blackPieceColor :
+            ui->blackPieceAccent;
+
+        if (i == ui->colorMenuSelection) {
+            SDL_SetRenderDrawColor(ui->renderer, 255, 255, 0, 255);
+            SDL_Rect r = { x - 10, y - 5, 320, 30 };
+            SDL_RenderDrawRect(ui->renderer, &r);
+        }
+
+        bitmap_font_draw_text(
+            ui->renderer,
+            &ui->font,
+            x,
+            y,
+            labels[i],
+            (SDL_Color) {
+            255, 255, 255, 255
+        }
+        );
+
+        SDL_SetRenderDrawColor(ui->renderer, c.r, c.g, c.b, 255);
+        SDL_Rect preview = { x + 250, y, 40, 20 };
+        SDL_RenderFillRect(ui->renderer, &preview);
+
+        y += 40;
+    }
+
+    bitmap_font_draw_text(
+        ui->renderer,
+        &ui->font,
+        60,
+        y + 20,
+        "UP/DOWN: Select | LEFT/RIGHT: RGB | +/-: Change | ESC: Back",
+        (SDL_Color) {
+        200, 200, 200, 255
+    }
+    );
+
+}
+
+
+
+void ui_render(UiState* ui, const GameState* game, const ChatLog* chat) {
     if (!ui) {
         return;
     }
+
+    if (ui->view == UI_VIEW_COLOR_MENU) {
+        render_color_menu(ui);
+        return;
+    }
+
 
     SDL_SetRenderDrawColor(ui->renderer, 18, 22, 36, 255);
     SDL_RenderClear(ui->renderer);
 
     if (ui->view == UI_VIEW_MAIN_MENU) {
         render_main_menu(ui);
-    } else {
+    }
+    else {
         if (game) {
             render_game_scene(ui, game, chat);
         }
@@ -460,7 +554,7 @@ static bool point_in_rect(int x, int y, SDL_Rect rect) {
     return x >= rect.x && x < rect.x + rect.w && y >= rect.y && y < rect.y + rect.h;
 }
 
-static bool screen_to_board(const UiState *ui, int x, int y, Position *outPos) {
+static bool screen_to_board(const UiState* ui, int x, int y, Position* outPos) {
     if (!ui || !outPos) {
         return false;
     }
@@ -478,67 +572,68 @@ static bool screen_to_board(const UiState *ui, int x, int y, Position *outPos) {
     return true;
 }
 
-static void update_hover_square(UiState *ui, int x, int y) {
+static void update_hover_square(UiState* ui, int x, int y) {
     Position pos;
     if (screen_to_board(ui, x, y, &pos)) {
         ui->hoverSquare = pos;
         ui->hasHover = true;
-    } else {
+    }
+    else {
         ui->hasHover = false;
     }
 }
 
-static bool handle_main_menu_click(int x, int y, UiCommand *outCommand) {
+static bool handle_main_menu_click(int x, int y, UiCommand* outCommand) {
     for (int i = 0; i < 4; ++i) {
         SDL_Rect button = main_menu_button_rect(i);
         if (point_in_rect(x, y, button)) {
             switch (i) {
-                case 0:
-                    outCommand->type = UI_CMD_START_PVE;
-                    return true;
-                case 1:
-                    outCommand->type = UI_CMD_START_PVP;
-                    return true;
-                case 2:
-                    outCommand->type = UI_CMD_LOAD;
-                    return true;
-                case 3:
-                    outCommand->type = UI_CMD_QUIT;
-                    return true;
-                default:
-                    break;
+            case 0:
+                outCommand->type = UI_CMD_START_PVE;
+                return true;
+            case 1:
+                outCommand->type = UI_CMD_START_PVP;
+                return true;
+            case 2:
+                outCommand->type = UI_CMD_LOAD;
+                return true;
+            case 3:
+                outCommand->type = UI_CMD_QUIT;
+                return true;
+            default:
+                break;
             }
         }
     }
     return false;
 }
 
-static bool handle_pause_menu_click(int x, int y, UiCommand *outCommand) {
+static bool handle_pause_menu_click(int x, int y, UiCommand* outCommand) {
     for (int i = 0; i < 4; ++i) {
         SDL_Rect button = pause_menu_button_rect(i);
         if (point_in_rect(x, y, button)) {
             switch (i) {
-                case 0:
-                    outCommand->type = UI_CMD_RESUME;
-                    return true;
-                case 1:
-                    outCommand->type = UI_CMD_SAVE;
-                    return true;
-                case 2:
-                    outCommand->type = UI_CMD_LOAD;
-                    return true;
-                case 3:
-                    outCommand->type = UI_CMD_MAIN_MENU;
-                    return true;
-                default:
-                    break;
+            case 0:
+                outCommand->type = UI_CMD_RESUME;
+                return true;
+            case 1:
+                outCommand->type = UI_CMD_SAVE;
+                return true;
+            case 2:
+                outCommand->type = UI_CMD_LOAD;
+                return true;
+            case 3:
+                outCommand->type = UI_CMD_MAIN_MENU;
+                return true;
+            default:
+                break;
             }
         }
     }
     return false;
 }
 
-static bool handle_game_click(UiState *ui, const GameState *game, int x, int y, UiCommand *outCommand) {
+static bool handle_game_click(UiState* ui, const GameState* game, int x, int y, UiCommand* outCommand) {
     if (!game) {
         return false;
     }
@@ -546,15 +641,17 @@ static bool handle_game_click(UiState *ui, const GameState *game, int x, int y, 
     Position boardPos;
     if (screen_to_board(ui, x, y, &boardPos)) {
         if (!ui->hasSelection) {
-            const Square *sq = &game->board[boardPos.row][boardPos.col];
+            const Square* sq = &game->board[boardPos.row][boardPos.col];
             if (sq->occupied && sq->owner == game->currentPlayer) {
                 ui->hasSelection = true;
                 ui->selectedSquare = boardPos;
             }
-        } else {
+        }
+        else {
             if (ui->selectedSquare.row == boardPos.row && ui->selectedSquare.col == boardPos.col) {
                 ui->hasSelection = false;
-            } else {
+            }
+            else {
                 outCommand->type = UI_CMD_PLAYER_MOVE;
                 outCommand->move.from = ui->selectedSquare;
                 outCommand->move.to = boardPos;
@@ -569,23 +666,23 @@ static bool handle_game_click(UiState *ui, const GameState *game, int x, int y, 
         SDL_Rect button = game_button_rect(ui, i);
         if (point_in_rect(x, y, button)) {
             switch (i) {
-                case 0:
-                    outCommand->type = game->isPaused ? UI_CMD_RESUME : UI_CMD_PAUSE;
-                    return true;
-                case 1:
-                    outCommand->type = UI_CMD_SAVE;
-                    return true;
-                case 2:
-                    outCommand->type = UI_CMD_LOAD;
-                    return true;
-                case 3:
-                    outCommand->type = UI_CMD_MAIN_MENU;
-                    return true;
-                case 4:
-                    ui_toggle_chat_speaker(ui);
-                    return false;
-                default:
-                    break;
+            case 0:
+                outCommand->type = game->isPaused ? UI_CMD_RESUME : UI_CMD_PAUSE;
+                return true;
+            case 1:
+                outCommand->type = UI_CMD_SAVE;
+                return true;
+            case 2:
+                outCommand->type = UI_CMD_LOAD;
+                return true;
+            case 3:
+                outCommand->type = UI_CMD_MAIN_MENU;
+                return true;
+            case 4:
+                ui_toggle_chat_speaker(ui);
+                return false;
+            default:
+                break;
             }
         }
     }
@@ -599,7 +696,94 @@ static bool handle_game_click(UiState *ui, const GameState *game, int x, int y, 
     return false;
 }
 
-bool ui_handle_event(UiState *ui, const SDL_Event *event, const GameState *game, UiCommand *outCommand) {
+bool ui_handle_event(UiState* ui, const SDL_Event* event, const GameState* game, UiCommand* outCommand) {
+
+    if (event->type == SDL_KEYDOWN) {
+        switch (event->key.keysym.sym) {
+
+            // 1 : couleur précédente BLANCS
+        case SDLK_SLASH:
+            ui->whiteColorIndex =
+                (ui->whiteColorIndex - 1 + PIECE_COLOR_COUNT) % PIECE_COLOR_COUNT;
+            ui->whitePieceColor = PIECE_COLORS[ui->whiteColorIndex];
+            return true;
+
+            // 2 : couleur suivante BLANCS
+        case SDLK_KP_MULTIPLY:
+            ui->whiteColorIndex =
+                (ui->whiteColorIndex + 1) % PIECE_COLOR_COUNT;
+            ui->whitePieceColor = PIECE_COLORS[ui->whiteColorIndex];
+            return true;
+
+            // 3 : couleur précédente NOIRS
+        case SDLK_KP_MINUS:
+            ui->blackColorIndex =
+                (ui->blackColorIndex - 1 + PIECE_COLOR_COUNT) % PIECE_COLOR_COUNT;
+            ui->blackPieceColor = PIECE_COLORS[ui->blackColorIndex];
+            return true;
+
+            // 4 : couleur suivante NOIRS
+        case SDLK_KP_PLUS:
+            ui->blackColorIndex =
+                (ui->blackColorIndex + 1) % PIECE_COLOR_COUNT;
+            ui->blackPieceColor = PIECE_COLORS[ui->blackColorIndex];
+            return true;
+        }
+    }
+
+
+    if (ui->view == UI_VIEW_COLOR_MENU && event->type == SDL_KEYDOWN) {
+        SDL_Keycode key = event->key.keysym.sym;
+
+        SDL_Color* colors[] = {
+            &ui->whitePieceColor,
+            &ui->whitePieceAccent,
+            &ui->blackPieceColor,
+            &ui->blackPieceAccent
+        };
+
+        SDL_Color* current = colors[ui->colorMenuSelection];
+
+        switch (key) {
+        case SDLK_ESCAPE:
+            ui->view = UI_VIEW_GAME;
+            return true;
+
+        case SDLK_UP:
+            ui->colorMenuSelection = (ui->colorMenuSelection + 3) % 4;
+            break;
+
+        case SDLK_DOWN:
+            ui->colorMenuSelection = (ui->colorMenuSelection + 1) % 4;
+            break;
+
+        case SDLK_LEFT:
+            ui->colorComponent = (ui->colorComponent + 2) % 3;
+            break;
+
+        case SDLK_RIGHT:
+            ui->colorComponent = (ui->colorComponent + 1) % 3;
+            break;
+
+        case SDLK_MINUS:
+        case SDLK_KP_MINUS:
+            ((Uint8*)current)[ui->colorComponent] -= 5;
+            break;
+
+        case SDLK_EQUALS:
+        case SDLK_KP_PLUS:
+            ((Uint8*)current)[ui->colorComponent] += 5;
+            break;
+        }
+        return true;
+    }
+
+    if (event->type == SDL_KEYDOWN && event->key.keysym.sym == SDLK_c) {
+        ui->view = UI_VIEW_COLOR_MENU;
+        return true;
+    }
+
+
     if (!ui || !event || !outCommand) {
         return false;
     }
@@ -608,87 +792,90 @@ bool ui_handle_event(UiState *ui, const SDL_Event *event, const GameState *game,
     outCommand->type = UI_CMD_NONE;
 
     switch (event->type) {
-        case SDL_QUIT:
-            outCommand->type = UI_CMD_QUIT;
-            return true;
+    case SDL_QUIT:
+        outCommand->type = UI_CMD_QUIT;
+        return true;
 
-        case SDL_MOUSEMOTION:
-            if (ui->view != UI_VIEW_MAIN_MENU) {
-                update_hover_square(ui, event->motion.x, event->motion.y);
-            }
-            break;
-
-        case SDL_MOUSEBUTTONDOWN:
-            if (event->button.button == SDL_BUTTON_LEFT) {
-                int x = event->button.x;
-                int y = event->button.y;
-                if (ui->view == UI_VIEW_MAIN_MENU) {
-                    return handle_main_menu_click(x, y, outCommand);
-                }
-                if (ui->view == UI_VIEW_PAUSE) {
-                    return handle_pause_menu_click(x, y, outCommand);
-                }
-                if (ui->view == UI_VIEW_GAME) {
-                    return handle_game_click(ui, game, x, y, outCommand);
-                }
-            } else if (event->button.button == SDL_BUTTON_RIGHT) {
-                ui->hasSelection = false;
-            }
-            break;
-
-        case SDL_KEYDOWN: {
-            SDL_Keycode key = event->key.keysym.sym;
-            if (key == SDLK_ESCAPE) {
-                if (ui->view == UI_VIEW_GAME) {
-                    outCommand->type = UI_CMD_PAUSE;
-                    return true;
-                }
-                if (ui->view == UI_VIEW_PAUSE) {
-                    outCommand->type = UI_CMD_RESUME;
-                    return true;
-                }
-            }
-            if (ui->view == UI_VIEW_GAME) {
-                if (key == SDLK_BACKSPACE) {
-                    if (ui->chatInputLength > 0) {
-                        ui->chatInput[--ui->chatInputLength] = '\0';
-                    }
-                } else if (key == SDLK_RETURN || key == SDLK_RETURN2 || key == SDLK_KP_ENTER) {
-                    if (ui->chatInputLength > 0) {
-                        outCommand->type = UI_CMD_CHAT_MESSAGE;
-                        strncpy(outCommand->chatMessage, ui->chatInput, CHAT_MESSAGE_LENGTH - 1);
-                        outCommand->chatMessage[CHAT_MESSAGE_LENGTH - 1] = '\0';
-                        ui->chatInputLength = 0;
-                        ui->chatInput[0] = '\0';
-                        return true;
-                    }
-                } else if (key == SDLK_TAB) {
-                    ui_toggle_chat_speaker(ui);
-                }
-            }
-            break;
+    case SDL_MOUSEMOTION:
+        if (ui->view != UI_VIEW_MAIN_MENU) {
+            update_hover_square(ui, event->motion.x, event->motion.y);
         }
+        break;
 
-        case SDL_TEXTINPUT:
+    case SDL_MOUSEBUTTONDOWN:
+        if (event->button.button == SDL_BUTTON_LEFT) {
+            int x = event->button.x;
+            int y = event->button.y;
+            if (ui->view == UI_VIEW_MAIN_MENU) {
+                return handle_main_menu_click(x, y, outCommand);
+            }
+            if (ui->view == UI_VIEW_PAUSE) {
+                return handle_pause_menu_click(x, y, outCommand);
+            }
             if (ui->view == UI_VIEW_GAME) {
-                size_t len = strnlen(event->text.text, sizeof(event->text.text));
-                for (size_t i = 0; i < len; ++i) {
-                    if (ui->chatInputLength + 1 < CHAT_INPUT_LENGTH) {
-                        ui->chatInput[ui->chatInputLength++] = event->text.text[i];
-                        ui->chatInput[ui->chatInputLength] = '\0';
-                    }
+                return handle_game_click(ui, game, x, y, outCommand);
+            }
+        }
+        else if (event->button.button == SDL_BUTTON_RIGHT) {
+            ui->hasSelection = false;
+        }
+        break;
+
+    case SDL_KEYDOWN: {
+        SDL_Keycode key = event->key.keysym.sym;
+        if (key == SDLK_ESCAPE) {
+            if (ui->view == UI_VIEW_GAME) {
+                outCommand->type = UI_CMD_PAUSE;
+                return true;
+            }
+            if (ui->view == UI_VIEW_PAUSE) {
+                outCommand->type = UI_CMD_RESUME;
+                return true;
+            }
+        }
+        if (ui->view == UI_VIEW_GAME) {
+            if (key == SDLK_BACKSPACE) {
+                if (ui->chatInputLength > 0) {
+                    ui->chatInput[--ui->chatInputLength] = '\0';
                 }
             }
-            break;
+            else if (key == SDLK_RETURN || key == SDLK_RETURN2 || key == SDLK_KP_ENTER) {
+                if (ui->chatInputLength > 0) {
+                    outCommand->type = UI_CMD_CHAT_MESSAGE;
+                    strncpy(outCommand->chatMessage, ui->chatInput, CHAT_MESSAGE_LENGTH - 1);
+                    outCommand->chatMessage[CHAT_MESSAGE_LENGTH - 1] = '\0';
+                    ui->chatInputLength = 0;
+                    ui->chatInput[0] = '\0';
+                    return true;
+                }
+            }
+            else if (key == SDLK_TAB) {
+                ui_toggle_chat_speaker(ui);
+            }
+        }
+        break;
+    }
 
-        default:
-            break;
+    case SDL_TEXTINPUT:
+        if (ui->view == UI_VIEW_GAME) {
+            size_t len = strnlen(event->text.text, sizeof(event->text.text));
+            for (size_t i = 0; i < len; ++i) {
+                if (ui->chatInputLength + 1 < CHAT_INPUT_LENGTH) {
+                    ui->chatInput[ui->chatInputLength++] = event->text.text[i];
+                    ui->chatInput[ui->chatInputLength] = '\0';
+                }
+            }
+        }
+        break;
+
+    default:
+        break;
     }
 
     return false;
 }
 
-void ui_set_view(UiState *ui, UiView view) {
+void ui_set_view(UiState* ui, UiView view) {
     if (!ui) {
         return;
     }
@@ -699,7 +886,7 @@ void ui_set_view(UiState *ui, UiView view) {
     }
 }
 
-void ui_set_status_message(UiState *ui, const char *message) {
+void ui_set_status_message(UiState* ui, const char* message) {
     if (!ui || !message) {
         return;
     }
@@ -709,7 +896,7 @@ void ui_set_status_message(UiState *ui, const char *message) {
     ui->statusVisibleUntil = SDL_GetTicks() + STATUS_MESSAGE_DURATION_MS;
 }
 
-void ui_update(UiState *ui, Uint32 deltaMs) {
+void ui_update(UiState* ui, Uint32 deltaMs) {
     (void)deltaMs;
     if (!ui) {
         return;
@@ -719,28 +906,48 @@ void ui_update(UiState *ui, Uint32 deltaMs) {
     }
 }
 
-ChatSpeaker ui_current_chat_speaker(const UiState *ui) {
+ChatSpeaker ui_current_chat_speaker(const UiState* ui) {
     if (!ui) {
         return CHAT_SPEAKER_SYSTEM;
     }
     return ui->chatSpeaker;
 }
 
-void ui_toggle_chat_speaker(UiState *ui) {
+void ui_toggle_chat_speaker(UiState* ui) {
     if (!ui) {
         return;
     }
     if (ui->chatSpeaker == CHAT_SPEAKER_WHITE) {
         ui->chatSpeaker = CHAT_SPEAKER_BLACK;
-    } else {
+    }
+    else {
         ui->chatSpeaker = CHAT_SPEAKER_WHITE;
     }
 }
 
-void ui_reset_game_interaction(UiState *ui) {
+void ui_reset_game_interaction(UiState* ui) {
     if (!ui) {
         return;
     }
     ui->hasSelection = false;
     ui->hasHover = false;
 }
+
+void ui_set_piece_colors(
+    UiState* ui,
+    SDL_Color whiteBase,
+    SDL_Color whiteAccent,
+    SDL_Color blackBase,
+    SDL_Color blackAccent
+) {
+    ui->whitePieceColor = whiteBase;
+    ui->whitePieceAccent = whiteAccent;
+    ui->blackPieceColor = blackBase;
+    ui->blackPieceAccent = blackAccent;
+}
+
+
+
+
+
+
